@@ -62,7 +62,7 @@ class MIPLIB(InMemoryDataset):
 
     def _extract_zip(self):
         # skip extract if the files in self.raw_dir. Count the number of files in the directory and compare with the number of files in the zip file.
-        # if the number of files is the same, skip the extraction.
+
         zip_path = osp.join(self.raw_dir, 'benchmark.zip')
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             num_files_in_zip = len(zip_ref.namelist())
@@ -89,7 +89,7 @@ class MIPLIB(InMemoryDataset):
         csv_data = self._get_sorted_csv_data()
         instances_to_process = csv_data.head(self.instance_limit) if self.instance_limit else csv_data
 
-        print("Extracting instances in order of increasing binary variables:")
+        print("Extracting instances in order of increasing variables:")
         for _, row in instances_to_process.iterrows():
             instance_name = row['InstanceInst.']
             filename = f"{instance_name}.mps.gz"
@@ -147,8 +147,8 @@ class MIPLIB(InMemoryDataset):
     def _process_mps_file(self, mps_file_path, tags):
         try:
             var1, instance = pulp.LpProblem.fromMPS(mps_file_path)
-        except IndexError:
-            print(f"Warning: Error reading MPS file {mps_file_path}. Skipping this instance.")
+        except Exception as e:
+            print(f"Warning: Error reading MPS file {mps_file_path}. Skipping this instance. Error: {e}")
             return None
 
         x, edge_index, edge_attr = self._create_tripartite_graph(instance)
