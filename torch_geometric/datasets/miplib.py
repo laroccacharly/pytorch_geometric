@@ -14,9 +14,11 @@ from tqdm import tqdm
 class MIPLIB(InMemoryDataset):
     url = 'https://miplib.zib.de/downloads/benchmark.zip'
     url_csv = "https://raw.githubusercontent.com/laroccacharly/pytorch_geometric/miplib_benchmark_data/miplib_benchmark.csv"
+    csv_headers = ["InstanceInst.","StatusStat.","VariablesVari.","BinariesBina.","IntegersInte.","ContinuousCont.","ConstraintsCons.","Nonz.Nonz.","SubmitterSubm.","GroupGrou.","ObjectiveObje.","TagsTags."]
     
-    def __init__(self, root: str, instance_limit: Optional[int] = None, force_reload: bool = False):
+    def __init__(self, root: str, instance_limit: Optional[int] = None, max_edges: int = 1000, force_reload: bool = False):
         self.instance_limit = instance_limit
+        self.max_edges = max_edges
         self.tag_to_label = {}
         self._num_classes = 0  # Initialize to 0
         super().__init__(root, transform=None, pre_transform=None, force_reload=force_reload)
@@ -59,40 +61,62 @@ class MIPLIB(InMemoryDataset):
         self._save_processed_data(data_list)
 
     def _extract_zip(self):
+        # skip extract if the files in self.raw_dir. Count the number of files in the directory and compare with the number of files in the zip file.
+        # if the number of files is the same, skip the extraction.
         zip_path = osp.join(self.raw_dir, 'benchmark.zip')
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            num_files_in_zip = len(zip_ref.namelist())
+        
+        num_files_in_dir = len(os.listdir(self.raw_dir))
+        
+        if num_files_in_dir >= num_files_in_zip:
+            print("Skipping extraction (already extracted)")
+            return
+        else:
+            print(f"Number of files in zip: {num_files_in_zip}")
+            print(f"Number of files in dir: {num_files_in_dir}")
         extract_dir = self.raw_dir
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
         print(f"Extracted zip file to {extract_dir}")
 
-    def _extract_gz_files(self):
+    def _get_sorted_csv_data(self):
         csv_data = pd.read_csv(osp.join(self.raw_dir, 'miplib_benchmark.csv'))
-        instances_to_process = csv_data['InstanceInst.'].head(self.instance_limit) if self.instance_limit else csv_data['InstanceInst.']
+        csv_data['VariablesVari.'] = pd.to_numeric(csv_data['VariablesVari.'], errors='coerce')
+        return csv_data.sort_values('VariablesVari.')
 
-        for filename in os.listdir(self.raw_dir):
-            if filename.endswith('.mps.gz'):
-                instance_name = filename[:-7]  # Remove .mps.gz extension
-                if instance_name in instances_to_process.values:
-                    gz_path = osp.join(self.raw_dir, filename)
-                    mps_path = gz_path[:-3]  # Remove .gz extension
-                    if not osp.exists(mps_path):
-                        with gzip.open(gz_path, 'rb') as f_in:
-                            with open(mps_path, 'wb') as f_out:
-                                f_out.write(f_in.read())
-                        print(f"Extracted: {filename}")
-                    else:
-                        print(f"Skipped extraction (already exists): {filename}")
+    def _extract_gz_files(self):
+        csv_data = self._get_sorted_csv_data()
+        instances_to_process = csv_data.head(self.instance_limit) if self.instance_limit else csv_data
+
+        print("Extracting instances in order of increasing binary variables:")
+        for _, row in instances_to_process.iterrows():
+            instance_name = row['InstanceInst.']
+            filename = f"{instance_name}.mps.gz"
+            gz_path = osp.join(self.raw_dir, filename)
+            
+            if os.path.exists(gz_path):
+                mps_path = gz_path[:-3]  # Remove .gz extension
+                if not osp.exists(mps_path):
+                    with gzip.open(gz_path, 'rb') as f_in:
+                        with open(mps_path, 'wb') as f_out:
+                            f_out.write(f_in.read())
+                    print(f"Extracted: {filename} (Binary variables: {row['BinariesBina.']})")
+                else:
+                    print(f"Skipped extraction (already exists): {filename} (Binary variables: {row['BinariesBina.']})")
+            else:
+                print(f"Warning: GZ file not found for instance {instance_name}")
 
     def _process_mps_files(self):
         data_list = []
         mps_dir = self.raw_dir
-        csv_data = pd.read_csv(osp.join(self.raw_dir, 'miplib_benchmark.csv'))
+        csv_data = self._get_sorted_csv_data()
         instances_to_process = csv_data.head(self.instance_limit) if self.instance_limit else csv_data
 
         # Create tag-to-label mapping
         all_tags = set()
         for tags in instances_to_process['TagsTags.']:
-            all_tags.update(tags.split())  # Split by whitespace instead of comma
+            all_tags.update(tags.split())
         self.tag_to_label = {tag: i for i, tag in enumerate(sorted(all_tags))}
         self.num_classes = len(self.tag_to_label)
 
@@ -101,7 +125,9 @@ class MIPLIB(InMemoryDataset):
         for tag in sorted(all_tags):
             print(f"  - {tag}")
 
+        print("Processing instances in order of increasing binary variables:")
         for _, row in instances_to_process.iterrows():
+            print(f"  - {row['InstanceInst.']} (Binary variables: {row['BinariesBina.']})")
             instance_name = row['InstanceInst.']
             filename = f"{instance_name}.mps"
             filepath = osp.join(mps_dir, filename)
@@ -110,20 +136,20 @@ class MIPLIB(InMemoryDataset):
                 print(f"Processing file: {filename}")
                 tags = row['TagsTags.']
                 data = self._process_mps_file(filepath, tags)
-                data_list.append(data)
+                if data is not None:
+                    data_list.append(data)
             else:
                 print(f"Warning: MPS file not found for instance {instance_name}")
 
         print(f"Processed {len(data_list)} instances")
         return data_list
 
-    def _save_processed_data(self, data_list):
-        data, slices = self.collate(data_list)
-        torch.save((data, slices), self.processed_paths[0])
-
-
     def _process_mps_file(self, mps_file_path, tags):
-        var1, instance = pulp.LpProblem.fromMPS(mps_file_path)
+        try:
+            var1, instance = pulp.LpProblem.fromMPS(mps_file_path)
+        except IndexError:
+            print(f"Warning: Error reading MPS file {mps_file_path}. Skipping this instance.")
+            return None
 
         x, edge_index, edge_attr = self._create_tripartite_graph(instance)
         y = self._get_label(tags)
@@ -140,7 +166,6 @@ class MIPLIB(InMemoryDataset):
         
         print(f"var_features shape: {var_features.shape}")
         print(f"const_features shape: {const_features.shape}")
-        print(f"obj_features shape: {obj_features.shape}")
 
         # Ensure all feature tensors have the same number of features
         max_features = max(var_features.size(1), const_features.size(1), obj_features.size(1))
@@ -194,35 +219,45 @@ class MIPLIB(InMemoryDataset):
         edge_index = []
         edge_attr = []
         
-        total_edges = (
-            sum(len(const) for const in problem.constraints.values()) +  # v-c edges
-            len(problem.objective) +  # v-o edges
-            num_constraints  # c-o edges
-        )
+        edge_count = 0
         
-        with tqdm(total=total_edges, desc="Building edges") as pbar:
+        with tqdm(total=self.max_edges, desc="Building edges") as pbar:
             # v-c edges
             for i, const in enumerate(problem.constraints.values()):
                 for j, (var, coeff) in enumerate(const.items()):
+                    if edge_count >= self.max_edges:
+                        break
                     edge_index.append([j, num_vars + i])
                     edge_attr.append([float(coeff)])
+                    edge_count += 1
                     pbar.update(1)
+                if edge_count >= self.max_edges:
+                    break
             
             # v-o edges
-            for i, (var, coeff) in enumerate(problem.objective.items()):
-                edge_index.append([i, num_vars + num_constraints])
-                edge_attr.append([float(coeff)])
-                pbar.update(1)
+            if edge_count < self.max_edges:
+                for i, (var, coeff) in enumerate(problem.objective.items()):
+                    if edge_count >= self.max_edges:
+                        break
+                    edge_index.append([i, num_vars + num_constraints])
+                    edge_attr.append([float(coeff)])
+                    edge_count += 1
+                    pbar.update(1)
             
             # c-o edges
-            for i in range(num_constraints):
-                edge_index.append([num_vars + i, num_vars + num_constraints])
-                edge_attr.append([float(problem.constraints[list(problem.constraints.keys())[i]].constant)])
-                pbar.update(1)
+            if edge_count < self.max_edges:
+                for i in range(num_constraints):
+                    if edge_count >= self.max_edges:
+                        break
+                    edge_index.append([num_vars + i, num_vars + num_constraints])
+                    edge_attr.append([float(problem.constraints[list(problem.constraints.keys())[i]].constant)])
+                    edge_count += 1
+                    pbar.update(1)
         
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(edge_attr, dtype=torch.float)
         
+        print(f"Total edges added: {edge_count}")
         return edge_index, edge_attr
 
     def _get_label(self, tags):
@@ -235,6 +270,10 @@ class MIPLIB(InMemoryDataset):
                 print(f"Warning: Tag '{tag}' not found in tag_to_label mapping")
         print(f"Label shape: {label.shape}")  # Add this line
         return label
+
+    def _save_processed_data(self, data_list):
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[0])
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}({len(self)}, num_classes={self.num_classes})'
