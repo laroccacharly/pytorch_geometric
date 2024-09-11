@@ -9,7 +9,7 @@ from torch_geometric.nn import GCNConv, global_mean_pool
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Load the MIPLIB dataset
-dataset = MIPLIB(root='data', instance_limit=10)
+dataset = MIPLIB(root='data', instance_limit=10, force_reload=True, max_edges=5000)
 data = dataset[0]
 
 # After loading the dataset
@@ -53,7 +53,6 @@ def train():
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data.x, data.edge_index, data.batch)
-        print(f"Out shape: {out.shape}")
         # Ensure the target is a 2D tensor of float type
         target = data.y.to(torch.float)
         # There is an issue where labels are flattened into a 1D tensor
@@ -82,7 +81,7 @@ def test(loader):
     return total_correct / total_samples
 
 # Training loop
-for epoch in range(1, 201):
+for epoch in range(1, 10):
     loss = train()
     train_acc = test(train_loader)
     test_acc = test(test_loader)
