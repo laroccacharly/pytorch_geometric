@@ -76,6 +76,7 @@ from .jodie import JODIEDataset
 from .wikidata import Wikidata5M
 from .myket import MyketDataset
 from .brca_tgca import BrcaTcga
+from .miplib import MIPLIB 
 
 from .dbp15k import DBP15K
 from .aminer import AMiner
@@ -208,6 +209,8 @@ hetero_datasets = [
     'OSE_GVCS',
     'RCDD',
     'OPFDataset',
+    "MIPLIB"
+
 ]
 hyper_datasets = [
     'CornellTemporalHyperGraphDataset',
