@@ -16,9 +16,10 @@ class MIPLIB(InMemoryDataset):
     url_csv = "https://raw.githubusercontent.com/laroccacharly/pytorch_geometric/miplib_benchmark_data/miplib_benchmark.csv"
     csv_headers = ["InstanceInst.","StatusStat.","VariablesVari.","BinariesBina.","IntegersInte.","ContinuousCont.","ConstraintsCons.","Nonz.Nonz.","SubmitterSubm.","GroupGrou.","ObjectiveObje.","TagsTags."]
     
-    def __init__(self, root: str, instance_limit: Optional[int] = None, max_edges: int = 1000, force_reload: bool = False):
+    def __init__(self, root: str, instance_limit: Optional[int] = None, max_edges: int = 1000, max_constraints: Optional[int] = None, force_reload: bool = False):
         self.instance_limit = instance_limit
         self.max_edges = max_edges
+        self.max_constraints = max_constraints
         self.tag_to_label = {}
         self._num_classes = 0  # Initialize to 0
         super().__init__(root, transform=None, pre_transform=None, force_reload=force_reload)
@@ -155,9 +156,15 @@ class MIPLIB(InMemoryDataset):
         y = self._get_label(tags)
         return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
 
+    def _get_constraints(self, problem):
+        constraints = list(problem.constraints.values())
+        if self.max_constraints is not None:
+            return constraints[:self.max_constraints]
+        return constraints
+
     def _create_tripartite_graph(self, instance):
         variables = instance.variables()
-        constraints = instance.constraints.values()
+        constraints = self._get_constraints(instance)
         
         # Create node features
         var_features = self._extract_variable_features(variables)
@@ -223,7 +230,9 @@ class MIPLIB(InMemoryDataset):
         
         with tqdm(total=self.max_edges, desc="Building edges") as pbar:
             # v-c edges
-            for i, const in enumerate(problem.constraints.values()):
+            constraints = self._get_constraints(problem)
+            
+            for i, const in enumerate(constraints):
                 for j, (var, coeff) in enumerate(const.items()):
                     if edge_count >= self.max_edges:
                         break
@@ -268,12 +277,11 @@ class MIPLIB(InMemoryDataset):
                 label[self.tag_to_label[tag]] = 1.0
             else:
                 print(f"Warning: Tag '{tag}' not found in tag_to_label mapping")
-        print(f"Label shape: {label.shape}")  # Add this line
-        return label
+        return label.view(1, -1) # shape (num_classes,)
 
     def _save_processed_data(self, data_list):
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
 
     def __repr__(self) -> str:
-        return f'{self.__class__.__name__}({len(self)}, num_classes={self.num_classes})'
+        return f'{self.__class__.__name__}({len(self)}, num_classes={self.num_classes}, max_constraints={self.max_constraints or "All"})'

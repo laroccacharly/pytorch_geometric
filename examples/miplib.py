@@ -6,12 +6,13 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GCNConv, global_mean_pool
 from sklearn.metrics import mean_absolute_error, mean_squared_error, confusion_matrix
 import numpy as np
+import time
 
 # Set up the device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Load the MIPLIB dataset
-dataset = MIPLIB(root='data', instance_limit=60, max_edges=2000)
+dataset = MIPLIB(root='data', instance_limit=110, max_edges=2000, max_constraints=1000) 
 data = dataset[0]
 
 # After loading the dataset
@@ -97,16 +98,37 @@ def test(loader):
     mse = mean_squared_error(all_true, all_pred)
     return accuracy, mae, mse, all_true, all_pred
 
+# Add these variables before the training loop
+best_test_acc = 0
+patience = 50
+counter = 0
+early_stop = False
+
 # Training loop
 max_epochs = 1000
 for epoch in range(1, max_epochs + 1):
+    start_time = time.time()  # Start timer for this epoch
+    
     train_loss, train_mae, train_mse, train_true, train_pred = train()
     train_acc, _, _, _, _ = test(train_loader)
     test_acc, test_mae, test_mse, test_true, test_pred = test(test_loader)
     
-    if epoch % 50 == 0 or epoch == max_epochs:
+    epoch_time = time.time() - start_time  # Calculate time taken for this epoch
+    
+    if test_acc > best_test_acc:
+        best_test_acc = test_acc
+        counter = 0
+    else:
+        counter += 1
+    
+    if counter >= patience:
+        print(f"Early stopping triggered at epoch {epoch}")
+        early_stop = True
+    
+    if epoch % 50 == 0 or epoch == max_epochs or early_stop:
         print(f'Epoch: {epoch:03d}, Loss: {train_loss:.4f}, '
-              f'Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
+              f'Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}, '
+              f'Time: {epoch_time:.2f}s')  # Added time per epoch
         print(f'Train MAE: {train_mae:.4f}, Train MSE: {train_mse:.4f}')
         print(f'Test MAE: {test_mae:.4f}, Test MSE: {test_mse:.4f}')
         
@@ -121,6 +143,9 @@ for epoch in range(1, max_epochs + 1):
             print(f"True: {true}, Predicted: {pred}")
         
         print("\n")
+    
+    if early_stop:
+        break
 
 # After training, print the distribution of predictions
 train_pred_dist = np.bincount(train_pred)
