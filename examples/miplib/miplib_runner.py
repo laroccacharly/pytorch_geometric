@@ -3,15 +3,15 @@ import time
 import numpy as np
 from sklearn.metrics import confusion_matrix, mean_absolute_error, mean_squared_error
 from .data_loader import DataLoaderTrait
+from .targets import TargetsTrait
 from .model import ModelTrait
 from .config import ConfigTrait
-from .naive_model import NaiveModelTrait
-from .neural_network_model import NeuralNetworkModelTrait
+from .naive_model import NaiveModel
+from .neural_network_model import NNModel
 
-class MIPLIBRunner(DataLoaderTrait, ModelTrait, ConfigTrait, NaiveModelTrait, NeuralNetworkModelTrait):
+class MIPLIBRunner(DataLoaderTrait, TargetsTrait, ModelTrait, ConfigTrait, NaiveModel, NNModel):
     def __init__(self):
         ConfigTrait.__init__(self)
-        NaiveModelTrait.__init__(self)
         self.config = self.get_config()
         self.device = torch.device(self.config['device'])
         self.set_seed(41)
@@ -35,20 +35,16 @@ class MIPLIBRunner(DataLoaderTrait, ModelTrait, ConfigTrait, NaiveModelTrait, Ne
             max_constraints=self.config['max_constraints']
         )
         self.num_node_features = dataset.num_features
-        self.num_classes = data.y.shape[0]  
+        print(f"Number of node features: {self.num_node_features}")
+        self.num_classes = data.y.shape[1]  
 
-        self.models = [
-            self.create_naive_model(),
-            self.create_neural_network_model()
-        ]
+        print(f"Number of classes: {self.num_classes}")
+        NaiveModel.__init__(self)
+        self.fit_and_evalute_naive() 
+        NNModel.__init__(self)
+        self.fit_and_evaluate_nn() 
+        self.evaluate_naive(self.test_loader)
 
-        for model in self.models:
-            self.run_model(model)
-
-    def run_model(self, model):
-        print(f"Running {model.name} Model...")
-        model.fit_and_evaluate(self.train_loader, self.test_loader, self.config)
-        
     def print_metrics(self, true, pred):
         accuracy = (np.array(true) == np.array(pred)).mean()
         mae = np.mean(np.abs(np.array(true) - np.array(pred)))

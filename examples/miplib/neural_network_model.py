@@ -2,22 +2,18 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, global_mean_pool
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from .targets import TargetsTrait
 
-class NeuralNetworkModelTrait:
-    def create_neural_network_model(self):
-        return NeuralNetworkModel(self.num_node_features, self.num_classes, self.config['hidden_channels'], self.device)
-
-class NeuralNetworkModel(torch.nn.Module, TargetsTrait):
-    def __init__(self, num_node_features, num_classes, hidden_channels, device):
+class NNModel(torch.nn.Module):
+    def __init__(self):
         super().__init__()
         self.name = "Neural Network"
-        self.device = device
+        hidden_channels = self.config['hidden_channels']
+        num_node_features = self.num_node_features
+
         self.conv1 = GCNConv(num_node_features, hidden_channels[0])
         self.conv2 = GCNConv(hidden_channels[0], hidden_channels[1])
-        self.out = torch.nn.Linear(hidden_channels[1], num_classes)
+        self.out = torch.nn.Linear(hidden_channels[1], self.num_classes)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
-        self.num_classes = num_classes
 
     def forward(self, x, edge_index, batch):
         x = F.relu(self.conv1(x, edge_index))
@@ -26,35 +22,26 @@ class NeuralNetworkModel(torch.nn.Module, TargetsTrait):
         x = self.out(x)
         return x
     
-    def fit_and_evaluate(self, train_loader, test_loader, config):
+    def fit_and_evaluate_nn(self):
         print("Fitting Neural Network Model...")
-        self.fit()
+        self.fit_nn()
         
         print("Evaluating Neural Network Model...")
-        train_acc, train_mae, train_mse, _, _ = self.evaluate(self.train_loader)
-        test_acc, test_mae, test_mse, _, _ = self.evaluate(self.test_loader) 
-        
-        print("Neural Network Model Results:")
-        print(f'Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
-        print(f'Train MAE: {train_mae:.4f}, Train MSE: {train_mse:.4f}')
-        print(f'Test MAE: {test_mae:.4f}, Test MSE: {test_mse:.4f}')
-        print("Neural Network Model Results:")
-        print(f'Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}')
-        print(f'Train MAE: {train_mae:.4f}, Train MSE: {train_mse:.4f}')
-        print(f'Test MAE: {test_mae:.4f}, Test MSE: {test_mse:.4f}')
+        train_acc, train_mae, train_mse, _, _ = self.evaluate_nn(self.train_loader)
+        test_acc, test_mae, test_mse, _, _ = self.evaluate_nn(self.test_loader) 
         
     def train_step(self, batch):
         self.train()
         self.optimizer.zero_grad()
-        out = self(batch.x, batch.edge_index, batch.batch)
-        targets = self.get_targets_from_batch_as_count(batch)
+        out = self.forward(batch.x, batch.edge_index, batch.batch)
+        targets = self.get_targets_from_batch_as_one_hot(batch)
         loss = F.cross_entropy(out, targets)
         loss.backward()
         self.optimizer.step()
-        return loss.item()
+        return loss
 
-    def fit(self):
-        max_epochs = 1000
+    def fit_nn(self):
+        max_epochs = 100
         loader = self.train_loader
         best_test_acc = 0
         patience = 50
@@ -62,7 +49,7 @@ class NeuralNetworkModel(torch.nn.Module, TargetsTrait):
         early_stop = False
         for epoch in range(1, max_epochs + 1):
             loss = self.fit_one_epoch(loader)
-            accuracy, _, _, _, _ = self.evaluate(loader)
+            accuracy, _, _, _, _ = self.evaluate_nn(loader)
             print(f'Epoch {epoch}, Loss: {loss:.4f}, Accuracy: {accuracy:.4f}')
             if accuracy > best_test_acc:
                 best_test_acc = accuracy
@@ -74,8 +61,11 @@ class NeuralNetworkModel(torch.nn.Module, TargetsTrait):
                 early_stop = True
 
             if epoch % 50 == 0 or epoch == max_epochs or early_stop:
-                test_acc, _, _, _, _ = self.evaluate(test_loader)
+                test_acc, _, _, _, _ = self.evaluate_nn(self.test_loader)
                 print(f'Epoch {epoch}, Test Accuracy: {test_acc:.4f}')
+
+            if early_stop: 
+                break 
     
     def fit_one_epoch(self, loader):
         total_loss = 0
@@ -87,7 +77,7 @@ class NeuralNetworkModel(torch.nn.Module, TargetsTrait):
         return total_loss / len(loader.dataset)
 
     @torch.no_grad()
-    def evaluate(self, loader):
+    def evaluate_nn(self, loader):
         self.eval()
         total_correct = 0
         total_samples = 0
@@ -106,4 +96,6 @@ class NeuralNetworkModel(torch.nn.Module, TargetsTrait):
         accuracy = total_correct / total_samples
         mae = mean_absolute_error(all_true, all_pred)
         mse = mean_squared_error(all_true, all_pred)
+        print("NN results" )
+        print("accuracy: ", accuracy)
         return accuracy, mae, mse, all_true, all_pred
