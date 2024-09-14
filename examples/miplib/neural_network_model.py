@@ -44,15 +44,16 @@ class NNModel(torch.nn.Module):
         max_epochs = 100
         loader = self.train_loader
         best_test_acc = 0
-        patience = 50
+        patience = self.config['patience']
         counter = 0
         early_stop = False
         for epoch in range(1, max_epochs + 1):
             loss = self.fit_one_epoch(loader)
-            accuracy, _, _, _, _ = self.evaluate_nn(loader)
-            print(f'Epoch {epoch}, Loss: {loss:.4f}, Accuracy: {accuracy:.4f}')
-            if accuracy > best_test_acc:
-                best_test_acc = accuracy
+            train_accuracy, _, _, _, _ = self.evaluate_nn(loader)
+            test_accuracy, _, _, _, _ = self.evaluate_nn(self.test_loader)
+            print(f'Epoch {epoch}, Loss: {loss:.4f}, Train Accuracy: {train_accuracy:.4f}, Test Accuracy: {test_accuracy:.4f}')
+            if test_accuracy > best_test_acc:
+                best_test_acc = test_accuracy
                 counter = 0
             else:
                 counter += 1

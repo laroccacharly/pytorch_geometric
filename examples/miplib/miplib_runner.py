@@ -14,12 +14,12 @@ class MIPLIBRunner(DataLoaderTrait, TargetsTrait, ModelTrait, ConfigTrait, Naive
         ConfigTrait.__init__(self)
         self.config = self.get_config()
         self.device = torch.device(self.config['device'])
-        self.set_seed(41)
+        self.set_seed(self.config['seed'])
         self.num_classes = None
         self.num_node_features = None
         self.models = []
 
-    def set_seed(self, seed):
+    def set_seed(self, seed = 42):
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         np.random.seed(seed)
